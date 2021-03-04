@@ -8,6 +8,7 @@ from pexpect.exceptions import TIMEOUT
 import yaml
 import base64
 import hashlib
+import boto3
 
 KEY_DOWN = "\x1b[B"
 
@@ -63,8 +64,12 @@ def init(args):
 
 
 class Login(object):
-    def __init__(self, config):
+    def __init__(self, config, args):
+
         self._config = config
+        self._args = vars(args)
+
+        self.progress("Starting", 0)
         self._child = pexpect.spawn(
             f"aws-azure-login --profile {config['profile']}",
             # logfile=sys.stdout,
@@ -72,7 +77,10 @@ class Login(object):
         )
 
         self._break = False
-        self.loop()
+        try:
+            self.loop()
+        except KeyboardInterrupt:
+            print("Canceled login.                     ")
 
     def loop(self):
         patterns = [
@@ -83,34 +91,49 @@ class Login(object):
             ".*Session Duration Hours",
             ".*Assuming role",
         ]
+        self.progress("Logging in", 0)
         n = self._child.expect(patterns[1::-1], timeout=10)
         if n == 1:
+            self.progress("Logging in", 1)
             self._child.sendline("")
-            print("Username selected. ")
             self._child.expect(patterns[1], timeout=5)
 
         self.password()
+        self.progress("Logged in", 2)
         n = self._child.expect(patterns[3:1:-1], timeout=5)
         if n == 1:
-            print("MFA approval required.")
+            self.progress("MFA approval required.", 3)
             self._child.expect(patterns[3], timeout=30)
-
+        self.progress("Role selected", 4)
         self.role()
         self._child.expect(patterns[4], timeout=5)
         self._child.sendline("1")
         self._child.expect(patterns[5], timeout=2)
-        print("Assuming role.")
+        self.progress("Assuming role.", 5)
         self._child.wait()
+        self.progress("Authenticated as " + self.get_aws_sts(), 6)
+        print()
 
     def password(self):
         self._child.sendline(
             Fernet(key()).decrypt(self._config["secret"].encode("utf8")).decode("utf8")
         )
-        print("Password sent.")
 
     def role(self):
-        self._child.sendline("\033[B" * 9)
-        print("Role selected.")
+        self._child.sendline(
+            "\033[B" * int(self._args.get("role") or self._config.get("role", 9))
+        )
+
+    def progress(self, text, counter=0, max=6):
+        print(
+            " [{0}{1}] {2: <24}\r".format("#" * counter, "-" * (max - counter), text),
+            end="",
+            flush=True,
+        )
+
+    def get_aws_sts(self):
+        response = boto3.client("sts").get_caller_identity()
+        return response["Account"] + "/" + response["Arn"].split("/")[1]
 
 
 def do_login(args):
@@ -120,7 +143,7 @@ def do_login(args):
     while tries < 5:
         tries += 1
         try:
-            Login(config)
+            Login(config, args)
             return
         except pexpect.exceptions.TIMEOUT:
             print("Timeout.")
@@ -128,8 +151,7 @@ def do_login(args):
 
 
 parser = argparse.ArgumentParser(sys.argv[0])
-parser.add_argument("-s", dest="select", help="Role selection number")
-parser.add_argument("-v", dest="verbose", default=False, action="store_true")
+parser.add_argument("-r", dest="role", help="Role selection number")
 parser.add_argument("--config", dest="config", default="~/.dontbugme.yaml")
 parser.set_defaults(func=do_login)
 sub = parser.add_subparsers(help="sub-command help")
