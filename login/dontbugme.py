@@ -52,10 +52,11 @@ def key():
 
 def init(args):
     p = input("aws-azure-login profile: ")
+    r = input("default role position: ")
     pw = getpass.getpass("Password:")
     f = Fernet(key())
     e = f.encrypt(pw.encode("utf-8"))
-    config = {"secret": e.decode("utf8"), "profile": p}
+    config = {"secret": e.decode("utf8"), "profile": p, "role": r}
     with open(
         os.open(
             os.path.expanduser(args.config),
@@ -203,23 +204,36 @@ def soon_to_expire(mins=15):
 
 
 parser = argparse.ArgumentParser(sys.argv[0])
-parser.add_argument("-r", dest="role", help="Role selection number")
-parser.add_argument("--config", dest="config", default="~/.dontbugme.yaml")
 parser.add_argument(
-    "-g", help="Start with gui", dest="gui", default=False, action="store_true"
+    "-c",
+    "--config",
+    dest="config",
+    default="~/.dontbugme.yaml",
+    help="Override default config file location",
 )
-parser.add_argument("--check", dest="check", action="store_true")
+parser.add_argument("-r", dest="role", help="Role position")
+parser.add_argument(
+    "-g",
+    help="Start with gui, used to allow 14day MFA approval",
+    dest="gui",
+    default=False,
+    action="store_true",
+)
+parser.add_argument(
+    "-e",
+    "--expiry",
+    dest="check",
+    action="store_true",
+    help="Check when session will expire",
+)
 parser.set_defaults(func=do_login)
-sub = parser.add_subparsers(help="sub-command help")
-pinit = sub.add_parser("init", help="a help")
+sub = parser.add_subparsers(help="")
+pinit = sub.add_parser("init", help="Initialise config files")
 pinit.set_defaults(func=init)
-pdaemon = sub.add_parser("daemon")
+pdaemon = sub.add_parser("daemon", help="Start in daemon mode")
 pdaemon.set_defaults(func=init_daemon)
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
     args.func(args)
-
-
-# We've sent a notification to your mobile device. Please open the Microsoft Authenticator app to respond.
