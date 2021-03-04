@@ -150,7 +150,7 @@ class Login(object):
 
 def do_login(args, daemon=False):
     if args.check:
-        print(expiry())
+        print(f"{expiry()} ({int(time_left().total_seconds() / 60)} mins)")
         return
 
     config = load_config(args.config)
@@ -196,6 +196,11 @@ def expiry():
         .astimezone(tz=None)
     )
     return expires
+
+
+def time_left():
+    now = datetime.now().replace(tzinfo=ZoneInfo("Australia/Melbourne"))
+    return expiry() - now
 
 
 def soon_to_expire(mins=15):
