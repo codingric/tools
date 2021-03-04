@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+import subprocess
+from datetime import datetime, timezone, timedelta
 import sys
 import argparse
 import getpass
@@ -9,6 +11,8 @@ import yaml
 import base64
 import hashlib
 import boto3
+from zoneinfo import ZoneInfo
+
 
 KEY_DOWN = "\x1b[B"
 
@@ -64,14 +68,15 @@ def init(args):
 
 
 class Login(object):
-    def __init__(self, config, args):
+    def __init__(self, config, args, daemon):
 
         self._config = config
         self._args = vars(args)
+        self._daemon = daemon
 
         self.progress("Starting", 0)
         self._child = pexpect.spawn(
-            f"aws-azure-login --profile {config['profile']}",
+            f"aws-azure-login --profile {config['profile']}{' -m gui' if args.gui else ''}",
             # logfile=sys.stdout,
             encoding="utf-8",
         )
@@ -91,17 +96,23 @@ class Login(object):
             ".*Session Duration Hours",
             ".*Assuming role",
         ]
-        self.progress("Logging in", 0)
-        n = self._child.expect(patterns[1::-1], timeout=10)
-        if n == 1:
-            self.progress("Logging in", 1)
-            self._child.sendline("")
-            self._child.expect(patterns[1], timeout=5)
+        if not self._args["gui"]:
+            self.progress("Logging in", 0)
+            n = self._child.expect(patterns[1::-1], timeout=15)
+            if n == 1:
+                self.progress("Logging in", 1)
+                self._child.sendline("")
+                self._child.expect(patterns[1], timeout=5)
 
-        self.password()
-        self.progress("Logged in", 2)
-        n = self._child.expect(patterns[3:1:-1], timeout=5)
+            self.password()
+            self.progress("Logged in", 2)
+        n = self._child.expect(
+            patterns[3:1:-1], timeout=5 if not self._args["gui"] else 60
+        )
         if n == 1:
+            if self._daemon:
+                print("Need to exit daemon mode.")
+                sys.exit(0)
             self.progress("MFA approval required.", 3)
             self._child.expect(patterns[3], timeout=30)
         self.progress("Role selected", 4)
@@ -136,27 +147,74 @@ class Login(object):
         return response["Account"] + "/" + response["Arn"].split("/")[1]
 
 
-def do_login(args):
+def do_login(args, daemon=False):
+    if args.check:
+        print(expiry())
+        return
+
     config = load_config(args.config)
     tries = 0
 
     while tries < 5:
         tries += 1
         try:
-            Login(config, args)
+            Login(config, args, daemon=daemon)
             return
         except pexpect.exceptions.TIMEOUT:
             print("Timeout.")
             pass
 
 
+def do_daemon(args, config):
+    while True:
+        if soon_to_expire():
+            do_login(args, True)
+        time.sleep(300)
+
+
+def init_daemon(args):
+    config = load_config(args.config)
+    try:
+        import daemon
+    except ModuleNotFoundError:
+        print("Missing requirement.\n`pip install python-daemon`")
+        sys.exit(1)
+    with daemon.DaemonContext():
+        do_daemon(args, config)
+
+
+def expiry():
+    session = (
+        subprocess.check_output("aws configure get aws_expiration", shell=True)
+        .decode("utf8")
+        .strip()
+    )
+    expires = (
+        datetime.strptime(session, "%Y-%m-%dT%H:%M:%S.000Z")
+        .replace(tzinfo=timezone.utc)
+        .astimezone(tz=None)
+    )
+    return expires
+
+
+def soon_to_expire(mins=15):
+    now = datetime.now().replace(tzinfo=ZoneInfo("Australia/Melbourne"))
+    return now > (expiry() - timedelta(minutes=mins))
+
+
 parser = argparse.ArgumentParser(sys.argv[0])
 parser.add_argument("-r", dest="role", help="Role selection number")
 parser.add_argument("--config", dest="config", default="~/.dontbugme.yaml")
+parser.add_argument(
+    "-g", help="Start with gui", dest="gui", default=False, action="store_true"
+)
+parser.add_argument("--check", dest="check", action="store_true")
 parser.set_defaults(func=do_login)
 sub = parser.add_subparsers(help="sub-command help")
 pinit = sub.add_parser("init", help="a help")
 pinit.set_defaults(func=init)
+pdaemon = sub.add_parser("daemon")
+pdaemon.set_defaults(func=init_daemon)
 
 
 if __name__ == "__main__":
