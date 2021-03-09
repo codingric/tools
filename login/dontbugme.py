@@ -138,7 +138,7 @@ class Login(object):
 
     def progress(self, text, counter=0, max=6):
         print(
-            " [{0}{1}] {2: <24}\r".format("#" * counter, "-" * (max - counter), text),
+            "\r\033[K [{0}{1}] {2} ".format("#" * counter, "-" * (max - counter), text),
             end="",
             flush=True,
         )
@@ -162,7 +162,7 @@ def do_login(args, daemon=False):
             Login(config, args, daemon=daemon)
             return
         except pexpect.exceptions.TIMEOUT:
-            print("Timeout.")
+            print("\rTimeout.\033[K")
             pass
 
 
