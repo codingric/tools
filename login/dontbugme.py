@@ -29,6 +29,10 @@ except ModuleNotFoundError:
     sys.exit(1)
 
 
+class NoConfigFile(Exception):
+    pass
+
+
 def load_config(config):
     try:
         with open(os.path.expanduser(config), "r") as f:
@@ -36,8 +40,7 @@ def load_config(config):
         data["key"] = key()
         return data
     except FileNotFoundError:
-        print(f"Please run `{sys.argv[0]} init`")
-        sys.exit(1)
+        raise NoConfigFile(f"Please run `{sys.argv[0]} config`")
 
 
 def key():
@@ -50,13 +53,28 @@ def key():
     return k
 
 
-def init(args):
-    p = input("aws-azure-login profile: ")
-    r = input("default role position: ")
+def config(args):
+    try:
+        config = load_config(args.config)
+    except NoConfigFile:
+        config = {}
+
+    p = input(
+        f"aws profile{' ('+config['profile']+')' if 'profile' in config else ''}: "
+    )
+    if p:
+        config["profile"] = p
+
+    r = input(
+        f"default role position{' ('+str(config['roles']['default'])+')' if 'roles' in config else ''}: "
+    )
+    if r:
+        config["roles"]["default"] = r
+
     pw = getpass.getpass("Password:")
     f = Fernet(key())
     e = f.encrypt(pw.encode("utf-8"))
-    config = {"secret": e.decode("utf8"), "profile": p, "roles": {"default": r}}
+    config["secret"] = e.decode("utf8")
     with open(
         os.open(
             os.path.expanduser(args.config),
@@ -161,7 +179,12 @@ def do_login(args, daemon=False):
         print(f"{expiry()} ({int(time_left().total_seconds() / 60)} mins)")
         return
 
-    config = load_config(args.config)
+    try:
+        config = load_config(args.config)
+    except NoConfigFile as e:
+        print(str(e))
+        sys.exit(1)
+
     tries = 0
 
     while tries < 5:
@@ -241,8 +264,8 @@ parser.add_argument(
 )
 parser.set_defaults(func=do_login)
 sub = parser.add_subparsers(help="")
-pinit = sub.add_parser("init", help="Initialise config files")
-pinit.set_defaults(func=init)
+pinit = sub.add_parser("config", help="Configure settings")
+pinit.set_defaults(func=config)
 pdaemon = sub.add_parser("daemon", help="Start in daemon mode")
 pdaemon.set_defaults(func=init_daemon)
 
