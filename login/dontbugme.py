@@ -56,7 +56,7 @@ def init(args):
     pw = getpass.getpass("Password:")
     f = Fernet(key())
     e = f.encrypt(pw.encode("utf-8"))
-    config = {"secret": e.decode("utf8"), "profile": p, "role": r}
+    config = {"secret": e.decode("utf8"), "profile": p, "roles": {"default": r}}
     with open(
         os.open(
             os.path.expanduser(args.config),
@@ -132,9 +132,17 @@ class Login(object):
         )
 
     def role(self):
-        self._child.sendline(
-            "\033[B" * int(self._args.get("role") or self._config.get("role", 9))
-        )
+        n = int(self._config["roles"]["default"])
+        if self._args.get("role"):
+            if self._args.get("role").isnumeric():
+                n = int(self._args.get("role"))
+            else:
+                try:
+                    n = int(self._config["roles"][self._args.get("role")])
+                except:
+                    pass
+
+        self._child.sendline("\033[B" * int(n))
 
     def progress(self, text, counter=0, max=6):
         print(
