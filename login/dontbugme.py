@@ -5,6 +5,7 @@ import sys
 import argparse
 import getpass
 import os
+import re
 import time
 from pexpect.exceptions import TIMEOUT
 import yaml
@@ -53,6 +54,35 @@ def key():
     return k
 
 
+def config_roles(args, config):
+    roles = config.get("roles")
+    if len(roles) > 1:
+        while True:
+            print("Roles:")
+            for k, v in roles.items():
+                print(f"{k}: {v}")
+            print("\n- to delete (eg. -dev)\n+ to add (eg: +prod=11)\nblank to save\n")
+            cmnd = input("Command: ")
+            if not cmnd:
+                break
+            if cmnd[0] == "-":
+                if cmnd[1:] in roles:
+                    del roles[cmnd[1:]]
+                else:
+                    print(f"{cmnd[1:]} doesn't exist")
+            elif cmnd[0] == "+":
+                if "=" in cmnd:
+                    k, n = cmnd[1:].split("=")
+                    roles[k] = n
+
+    r = input(
+        f"default role position{' ('+str(roles['default'])+')' if 'default' in roles else ''}: "
+    )
+    if r:
+        config["roles"]["default"] = r
+    return roles
+
+
 def config(args):
     try:
         config = load_config(args.config)
@@ -65,11 +95,7 @@ def config(args):
     if p:
         config["profile"] = p
 
-    r = input(
-        f"default role position{' ('+str(config['roles']['default'])+')' if 'roles' in config else ''}: "
-    )
-    if r:
-        config["roles"]["default"] = r
+    config["roles"] = config_roles(args, config)
 
     pw = getpass.getpass("Password:")
     f = Fernet(key())
