@@ -55,31 +55,53 @@ def key():
 
 
 def config_roles(args, config):
-    roles = config.get("roles")
-    if len(roles) > 1:
-        while True:
-            print("Roles:")
-            for k, v in roles.items():
-                print(f"{k}: {v}")
-            print("\n- to delete (eg. -dev)\n+ to add (eg: +prod=11)\nblank to save\n")
-            cmnd = input("Command: ")
-            if not cmnd:
-                break
-            if cmnd[0] == "-":
-                if cmnd[1:] in roles:
-                    del roles[cmnd[1:]]
-                else:
-                    print(f"{cmnd[1:]} doesn't exist")
-            elif cmnd[0] == "+":
-                if "=" in cmnd:
-                    k, n = cmnd[1:].split("=")
-                    roles[k] = n
+    roles = config.get("roles", {})
 
-    r = input(
-        f"default role position{' ('+str(roles['default'])+')' if 'default' in roles else ''}: "
-    )
-    if r:
-        config["roles"]["default"] = r
+    q = 0
+    done = False
+    while True:
+        o = len(roles)
+        zz = (
+            "[add: +prod=11, remove: -meta, default: *dev, save: blank]"
+            if not done
+            else ""
+        )
+        print(f"Roles: {zz}\n------")
+        f = True
+        for k, v in roles.items():
+            print(f"  {k}: {v}{' (default)' if f else ''}")
+            f = False
+        if len(roles) == 0:
+            print("None.")
+        print("------")
+        if done:
+            break
+        cmnd = input("Command: ")
+        for x in range(o + (4 if o > 0 else 5)):
+            print("\u001b[1A\r\033[K", end="")
+        if not cmnd:
+            done = True
+            continue
+        if cmnd[0] == "-":
+            if cmnd[1:] in roles:
+                del roles[cmnd[1:]]
+        elif cmnd[0] == "+":
+            if "=" in cmnd:
+                k, n = cmnd[1:].split("=")
+                roles[k] = n
+        elif cmnd[0] == "*":
+            if cmnd[1:] in roles:
+                n = roles.pop(cmnd[1:])
+                l = list(roles.items())
+                l.insert(0, (cmnd[1:], n))
+                roles = dict(l)
+
+    if len(roles) < 1:
+        r = input(
+            f"default role position{' ('+str(roles['default'])+')' if 'default' in roles else ''}: "
+        )
+        if r:
+            roles["default"] = r
     return roles
 
 
@@ -97,10 +119,13 @@ def config(args):
 
     config["roles"] = config_roles(args, config)
 
-    pw = getpass.getpass("Password:")
-    f = Fernet(key())
-    e = f.encrypt(pw.encode("utf-8"))
-    config["secret"] = e.decode("utf8")
+    pw = getpass.getpass(f"Password{ ' (*****)' if 'secret' in config else ''}:")
+
+    if pw:
+        f = Fernet(key())
+        e = f.encrypt(pw.encode("utf-8"))
+        config["secret"] = e.decode("utf8")
+
     with open(
         os.open(
             os.path.expanduser(args.config),
@@ -176,7 +201,7 @@ class Login(object):
         )
 
     def role(self):
-        n = int(self._config["roles"]["default"])
+        n = int(list(self._config["roles"].values())[0])
         if self._args.get("role"):
             if self._args.get("role").isnumeric():
                 n = int(self._args.get("role"))
@@ -212,6 +237,10 @@ def do_login(args, daemon=False):
         config = load_config(args.config)
     except NoConfigFile as e:
         print(str(e))
+        sys.exit(1)
+
+    if args.role and args.role not in config["roles"]:
+        print(f"Role can only be one of: {' '.join(list(config['roles'].keys()))}")
         sys.exit(1)
 
     tries = 0
