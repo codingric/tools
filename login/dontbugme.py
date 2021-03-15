@@ -167,7 +167,7 @@ class Login(object):
         self._child.expect(patterns[5], timeout=2)
         self.progress("Assuming role.", 5)
         self._child.wait()
-        self.progress("Authenticated as " + self.get_aws_sts(), 6)
+        self.progress("Authenticated as " + get_aws_sts(), 6)
         print()
 
     def password(self):
@@ -195,14 +195,17 @@ class Login(object):
             flush=True,
         )
 
-    def get_aws_sts(self):
-        response = boto3.client("sts").get_caller_identity()
-        return response["Account"] + "/" + response["Arn"].split("/")[1]
+
+def get_aws_sts():
+    response = boto3.client("sts").get_caller_identity()
+    return response["Account"] + "/" + response["Arn"].split("/")[1]
 
 
 def do_login(args, daemon=False):
     if args.check:
-        print(f"{expiry()} ({int(time_left().total_seconds() / 60)} mins)")
+        print(
+            f"{expiry()} ({int(time_left().total_seconds() / 60)} mins) - {get_aws_sts()}"
+        )
         return
 
     try:
