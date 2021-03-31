@@ -34,6 +34,18 @@ class NoConfigFile(Exception):
     pass
 
 
+def aws_configure_get(key):
+    return (
+        subprocess.check_output(f"aws configure get {key}", shell=True)
+        .decode("utf8")
+        .strip()
+    )
+
+
+def aws_configure_set(key, value):
+    subprocess.check_output(f"aws configure set {key} {value}", shell=True)
+
+
 def load_config(config):
     try:
         with open(os.path.expanduser(config), "r") as f:
@@ -192,7 +204,9 @@ class Login(object):
         self._child.expect(patterns[5], timeout=2)
         self.progress("Assuming role.", 5)
         self._child.wait()
-        self.progress("Authenticated as " + get_aws_sts(), 6)
+        role = get_aws_sts()
+        aws_configure_set("dontbugme_role", role)
+        self.progress(f"Authenticated as {role}", 6)
         print()
 
     def password(self):
@@ -228,9 +242,9 @@ def get_aws_sts():
 
 def do_login(args, daemon=False):
     if args.check:
-        print(
-            f"{expiry()} ({int(time_left().total_seconds() / 60)} mins) - {get_aws_sts()}"
-        )
+        min_left = int(time_left().total_seconds() / 60)
+        whoami = aws_configure_get("dontbugme_role") or "Noone"
+        print(f"{expiry()} ({min_left} mins) - {whoami}")
         return
 
     try:
@@ -274,13 +288,8 @@ def init_daemon(args):
 
 
 def expiry():
-    session = (
-        subprocess.check_output("aws configure get aws_expiration", shell=True)
-        .decode("utf8")
-        .strip()
-    )
     expires = (
-        datetime.strptime(session, "%Y-%m-%dT%H:%M:%S.000Z")
+        datetime.strptime(aws_configure_get("aws_expiration"), "%Y-%m-%dT%H:%M:%S.000Z")
         .replace(tzinfo=timezone.utc)
         .astimezone(tz=None)
     )
