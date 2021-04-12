@@ -34,6 +34,10 @@ class NoConfigFile(Exception):
     pass
 
 
+class InvalidPassword(Exception):
+    pass
+
+
 def aws_configure_get(key):
     return (
         subprocess.check_output(f"aws configure get {key}", shell=True)
@@ -187,18 +191,20 @@ class Login(object):
                 self._child.expect(patterns[1], timeout=5)
 
             self.password()
-            self.progress("Logged in", 2)
-        n = self._child.expect(
-            patterns[3:1:-1], timeout=5 if not self._args["gui"] else 60
-        )
+        p = patterns[3:1:-1]
+        p.append(pexpect.TIMEOUT)
+        n = self._child.expect(p, timeout=5 if not self._args["gui"] else 60)
+        if n == 2:
+            raise InvalidPassword()
+        self.progress("Logged in", 2)
         if n == 1:
             if self._daemon:
                 print("Need to exit daemon mode.")
                 sys.exit(0)
             self.progress("MFA approval required.", 3)
             self._child.expect(patterns[3], timeout=30)
-        self.progress("Role selected", 4)
         self.role()
+        self.progress("Role selected", 4)
         self._child.expect(patterns[4], timeout=5)
         self._child.sendline("1")
         self._child.expect(patterns[5], timeout=2)
@@ -210,9 +216,8 @@ class Login(object):
         print()
 
     def password(self):
-        self._child.sendline(
-            Fernet(key()).decrypt(self._config["secret"].encode("utf8")).decode("utf8")
-        )
+        p = Fernet(key()).decrypt(self._config["secret"].encode("utf8")).decode("utf8")
+        self._child.sendline(p)
 
     def role(self):
         n = int(list(self._config["roles"].values())[0])
@@ -267,6 +272,9 @@ def do_login(args, daemon=False):
         except pexpect.exceptions.TIMEOUT:
             print("\rTimeout.\033[K")
             pass
+        except InvalidPassword:
+            print("\rError: Incorrect password, run `dontbugme config`.\033[K")
+            return
 
 
 def do_daemon(args, config):
