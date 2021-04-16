@@ -17,6 +17,8 @@ from zoneinfo import ZoneInfo
 
 KEY_DOWN = "\x1b[B"
 
+PROFILE = os.environ.get("AWS_DEFAULT_PROFILE")
+
 try:
     from cryptography.fernet import Fernet
 except ModuleNotFoundError:
@@ -39,15 +41,21 @@ class InvalidPassword(Exception):
 
 
 def aws_configure_get(key):
+    global PROFILE
     return (
-        subprocess.check_output(f"aws configure get {key}", shell=True)
+        subprocess.check_output(
+            f"aws configure get {key} --profile {PROFILE}", shell=True
+        )
         .decode("utf8")
         .strip()
     )
 
 
 def aws_configure_set(key, value):
-    subprocess.check_output(f"aws configure set {key} {value}", shell=True)
+    global PROFILE
+    subprocess.check_output(
+        f"aws --profile {PROFILE} configure set {key} {value}", shell=True
+    )
 
 
 def load_config(config):
@@ -122,6 +130,7 @@ def config_roles(args, config):
 
 
 def config(args):
+    global PROFILE
     try:
         config = load_config(args.config)
     except NoConfigFile:
@@ -132,6 +141,7 @@ def config(args):
     )
     if p:
         config["profile"] = p
+        PROFILE = PROFILE or p
 
     config["roles"] = config_roles(args, config)
 
@@ -155,14 +165,14 @@ def config(args):
 
 class Login(object):
     def __init__(self, config, args, daemon):
-
+        global PROFILE
         self._config = config
         self._args = vars(args)
         self._daemon = daemon
 
         self.progress("Starting", 0)
         self._child = pexpect.spawn(
-            f"aws-azure-login --profile {config['profile']}{' -m gui' if args.gui else ''}",
+            f"aws-azure-login --profile {PROFILE}{' -m gui' if args.gui else ''}",
             # logfile=sys.stdout,
             encoding="utf-8",
         )
@@ -171,13 +181,13 @@ class Login(object):
         try:
             self.loop()
         except KeyboardInterrupt:
-            print("Canceled login.                     ")
+            print("\r\033[KCanceled login.\033[K")
 
     def loop(self):
         patterns = [
             ".*Username.*",
             "(?i)password",
-            "We've.*",
+            "We've.*|Open your Microsoft Authenticator.*",
             ".*Role:.*Use",
             ".*Session Duration Hours",
             ".*Assuming role",
@@ -191,12 +201,13 @@ class Login(object):
                 self._child.expect(patterns[1], timeout=5)
 
             self.password()
-        p = patterns[3:1:-1]
-        p.append(pexpect.TIMEOUT)
+        p = [patterns[3], patterns[2], pexpect.TIMEOUT]
         n = self._child.expect(p, timeout=5 if not self._args["gui"] else 60)
         if n == 2:
+            z = self._child.expect([patterns[1]], timeout=1)
             raise InvalidPassword()
-        self.progress("Logged in", 2)
+
+        self.progress(f"Logged in ({n})", 2)
         if n == 1:
             if self._daemon:
                 print("Need to exit daemon mode.")
@@ -241,7 +252,10 @@ class Login(object):
 
 
 def get_aws_sts():
-    response = boto3.client("sts").get_caller_identity()
+    global PROFILE
+    response = (
+        boto3.session.Session(profile_name=PROFILE).client("sts").get_caller_identity()
+    )
     return response["Account"] + "/" + response["Arn"].split("/")[1]
 
 
@@ -258,7 +272,7 @@ def do_login(args, daemon=False):
         print(str(e))
         sys.exit(1)
 
-    if args.role and args.role not in config["roles"]:
+    if args.role and not args.role.isdigit() and args.role not in config["roles"]:
         print(f"Role can only be one of: {' '.join(list(config['roles'].keys()))}")
         sys.exit(1)
 
@@ -273,9 +287,9 @@ def do_login(args, daemon=False):
             print("\rTimeout.\033[K")
             pass
         except InvalidPassword:
-            print("\rError: Incorrect password, run `dontbugme config`.\033[K")
-            return
-
+            print("\rIncorrect password, run `dontbugme config`.\033[K")
+            sys.exit(1)
+    sys.exit(2)
 
 def do_daemon(args, config):
     while True:
@@ -297,7 +311,10 @@ def init_daemon(args):
 
 def expiry():
     expires = (
-        datetime.strptime(aws_configure_get("aws_expiration"), "%Y-%m-%dT%H:%M:%S.000Z")
+        datetime.strptime(
+            aws_configure_get("aws_expiration"),
+            "%Y-%m-%dT%H:%M:%S.000Z",
+        )
         .replace(tzinfo=timezone.utc)
         .astimezone(tz=None)
     )
@@ -337,6 +354,9 @@ parser.add_argument(
     action="store_true",
     help="Check when session will expire",
 )
+parser.add_argument(
+    "-p", "--profile", dest="profile", help="override config AWS Profile to use"
+)
 parser.set_defaults(func=do_login)
 sub = parser.add_subparsers(help="")
 pinit = sub.add_parser("config", help="Configure settings")
@@ -347,4 +367,5 @@ pdaemon.set_defaults(func=init_daemon)
 
 if __name__ == "__main__":
     args = parser.parse_args()
+    PROFILE = PROFILE or args.profile
     args.func(args)
