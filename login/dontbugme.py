@@ -1,40 +1,61 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3.9
+import sys
+
+if sys.version_info.major < 3 or sys.version_info.minor < 9:
+    print("Sorry this script requires python 3.9+")
+    sys.exit(1)
+
 import subprocess
 from datetime import datetime, timezone, timedelta
-import sys
 import argparse
 import getpass
 import os
 import re
 import time
-from pexpect.exceptions import TIMEOUT
-import yaml
+
 import base64
 import hashlib
-import boto3
 
 
 KEY_DOWN = "\x1b[B"
 
 PROFILE = os.environ.get("AWS_DEFAULT_PROFILE")
 
+MISSING = []
+
+
 try:
-    from zoneinfo import ZoneInfo
+    import boto3
 except ModuleNotFoundError:
-    print("Missing requirement.\n`pip install zoneinfo`")
-    sys.exit(1)
+    MISSING.append("boto")
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    MISSING.append("pyyaml")
 
 try:
     from cryptography.fernet import Fernet
 except ModuleNotFoundError:
-    print("Missing requirement.\n`pip install cryptography`")
-    sys.exit(1)
+    MISSING.append("cryptography")
 
 try:
     import pexpect
+    from pexpect.exceptions import TIMEOUT
 except ModuleNotFoundError:
-    print("Missing requirement.\n`pip install pexpect`")
-    sys.exit(1)
+    MISSING.append("pexpect")
+
+if MISSING:
+    if "install" in sys.argv:
+        for n in MISSING:
+            subprocess.check_call(f"pip install {n}", shell=True, stdout=sys.stdout)
+        sys.exit(0)
+    else:
+        print("You have the following modules missing:")
+        for n in MISSING:
+            print(f"- {n}")
+        print(f"\nTo install run `{sys.argv[0]} install`")
+        sys.exit(1)
 
 
 class NoConfigFile(Exception):
