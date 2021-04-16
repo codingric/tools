@@ -12,12 +12,17 @@ import yaml
 import base64
 import hashlib
 import boto3
-from zoneinfo import ZoneInfo
 
 
 KEY_DOWN = "\x1b[B"
 
 PROFILE = os.environ.get("AWS_DEFAULT_PROFILE")
+
+try:
+    from zoneinfo import ZoneInfo
+except ModuleNotFoundError:
+    print("Missing requirement.\n`pip install zoneinfo`")
+    sys.exit(1)
 
 try:
     from cryptography.fernet import Fernet
@@ -290,6 +295,7 @@ def do_login(args, daemon=False):
             print("\rIncorrect password, run `dontbugme config`.\033[K")
             sys.exit(1)
     sys.exit(2)
+
 
 def do_daemon(args, config):
     while True:
